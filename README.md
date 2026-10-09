@@ -1,4 +1,4 @@
-# Client Dashboard Health Check Tool
+# Automated CMS Dashboard Health Check Tool
 
 A Python command-line tool that automates a daily monitoring routine: pulling the content and importer health statuses from a client's CMS dashboard, filtering them down to what needs attention, saving the results as text and CSV reports, emailing a summary to the team, and drafting an error report for the engineers. It replaces a manual check-and-copy routine with a repeatable, four-step workflow that still keeps a human in the loop before anything is sent to engineers.
 
