@@ -1,0 +1,14 @@
+curl --url ^"https://www.placeholder-url.com/ajax/tooltip/get?url=^%^2Fhome^" ^
+  -H ^"Accept: */*^" ^
+  -H ^"Accept-Language: en,en-PH;q=0.9,ku;q=0.8,en-US;q=0.7,de-DE;q=0.6,de;q=0.5^" ^
+  -H ^"Connection: keep-alive^" ^
+  -b ^"USER_ANALYSIS=14bd145f97ae659831cdf21^%^7C24928484; CSRF_TOKEN=MTc5MTUwMTczNjE5ODBjMzg3OTViMDlkOWUyODNmY2ZkMDUxMjk2YjI5NDZhYTA2ZjZIQmVHNVJtdmJ1bGlmVHVGd3J4WWRnWVlIRGh6RUdTbw^%^3D^%^3D; PHPSESSID=9e55292459d39a9e3712350689d5a900^" ^
+  -H ^"Referer: https://www.placeholder-url.com/home^" ^
+  -H ^"Sec-Fetch-Dest: empty^" ^
+  -H ^"Sec-Fetch-Mode: cors^" ^
+  -H ^"Sec-Fetch-Site: same-origin^" ^
+  -H ^"User-Agent: Mozilla/5.0 ^(Windows NT 10.0; Win64; x64^) AppleWebKit/537.36 ^(KHTML, like Gecko^) Chrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0^" ^
+  -H ^"X-Requested-With: XMLHttpRequest^" ^
+  -H ^"sec-ch-ua: ^\^"Chromium^\^";v=^\^"154^\^", ^\^"Microsoft Edge^\^";v=^\^"154^\^", ^\^"Not A^(Brand^\^";v=^\^"99^\^"^" ^
+  -H ^"sec-ch-ua-mobile: ?0^" ^
+  -H ^"sec-ch-ua-platform: ^\^"Windows^\^"^"

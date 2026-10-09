@@ -1,0 +1,7 @@
+.env
+outbox/
+__pycache__/
+*.lnk
+data/responses/
+data/daily_check/
+documentation.md
