@@ -6,6 +6,9 @@
 import json
 from pathlib import Path
 import os
+import re
+import urllib.parse
+import webbrowser
 
 import pandas as pd
 import win32com.client
@@ -133,14 +136,18 @@ def send_outlook_email(to, subject, body, attachments=None):
     create_outlook_email() below, which opens a draft for manual review instead
     of sending automatically (used for the engineer notification).
 
-    NOTE: no try/except around win32com.client.Dispatch — if Outlook isn't
-    installed/running, or COM automation is unavailable (e.g. a non-interactive
-    Windows session such as a scheduled task with no logged-in desktop), this
-    raises pywintypes.com_error, which propagates up and is caught generically
-    by main.py's send_email_summary_flow().
+    Automated sending via COM requires Classic Desktop Outlook. If COM
+    automation is unavailable, raises a descriptive RuntimeError.
     """
-    # Create Outlook application
-    outlook = win32com.client.Dispatch("Outlook.Application")
+    try:
+        # Create Outlook application
+        outlook = win32com.client.Dispatch("Outlook.Application")
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to connect to Outlook via COM: {e}. "
+            "Automated sending (Step 3) requires Classic Desktop Outlook with COM support. "
+            "If using New Outlook for Windows, automatic background sending is not supported."
+        ) from e
     
     # Create a new email
     mail = outlook.CreateItem(0)  # 0 = mail item
@@ -270,54 +277,133 @@ def perform_health_check():
     
     print('RUN SUCCESSFUL')
 
-def create_outlook_email(to, subject, body, cc=None, bcc=None, attachments=None):
-    """
-    Create and open a new Outlook mail window with pre-filled content.
+def html_to_plain_text(html_text: str) -> str:
+    """Convert HTML snippet to readable plain text for mailto URL bodies."""
+    if not html_text:
+        return ""
+    # Replace <br>, <br/>, <p> tags with newlines
+    text = re.sub(r'</?(?:br|p)\s*/?>', '\n', html_text, flags=re.IGNORECASE)
+    # Strip any remaining HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    # Normalize excessive newlines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
-    Unlike send_outlook_email(), this calls mail.Display() instead of
-    mail.Send() — the draft is left open for the user to review/edit before
-    manually sending. Used by send_mail_to_engineers() for the engineer
-    notification, which should always be reviewed before going out.
+
+def open_mailto_draft(to, subject, body, cc=None, bcc=None):
+    """Open the system default email client using a mailto URL as fallback.
+
+    RFC 6068 requires comma separation for recipient lists and standard percent-encoding.
+    Truncates the body if the total mailto URL length exceeds ~2000 characters to prevent
+    Windows shell command execution failures.
+    """
+    def format_recipients(recipients):
+        if not recipients:
+            return ""
+        if isinstance(recipients, str):
+            return recipients.replace(';', ',')
+        return ', '.join(recipients)
+
+    to_str = format_recipients(to)
+    cc_str = format_recipients(cc)
+    bcc_str = format_recipients(bcc)
+
+    safe_body = body or ""
+    # Base URL length estimate before encoding body (Windows ShellExecute limit is ~2048 chars)
+    base_params = {}
+    if cc_str:
+        base_params['cc'] = cc_str
+    if bcc_str:
+        base_params['bcc'] = bcc_str
+    if subject:
+        base_params['subject'] = subject
+
+    base_query = urllib.parse.urlencode(base_params, quote_via=urllib.parse.quote)
+    base_len = len(f"mailto:{to_str}?{base_query}&body=")
+
+    max_encoded_body_len = max(500, 1950 - base_len)
+    encoded_body = urllib.parse.quote(safe_body)
+
+    if len(encoded_body) > max_encoded_body_len:
+        notice = "\n\n[... Truncated for mailto link length. See full CSV report in data/daily_check/csv/]"
+        while len(urllib.parse.quote(safe_body + notice)) > max_encoded_body_len and len(safe_body) > 100:
+            safe_body = safe_body[:int(len(safe_body) * 0.8)]
+        safe_body += notice
+
+    params = {}
+    if cc_str:
+        params['cc'] = cc_str
+    if bcc_str:
+        params['bcc'] = bcc_str
+    if subject:
+        params['subject'] = subject
+    if safe_body:
+        params['body'] = safe_body
+
+    query = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
+    mailto_url = f"mailto:{to_str}?{query}" if query else f"mailto:{to_str}"
+
+    try:
+        os.startfile(mailto_url)
+    except Exception:
+        webbrowser.open(mailto_url)
+
+
+def create_outlook_email(to, subject, body, cc=None, bcc=None, attachments=None, body_plain=None):
+    """
+    Create and open a new email draft with pre-filled content.
+
+    Attempts to use Classic Outlook via COM automation (mail.Display()) so the
+    draft is left open for manual review. If COM automation is unavailable
+    (e.g., New Outlook for Windows or no classic Outlook installed), falls back
+    gracefully to opening the draft in the system default mail client via mailto:.
 
     Args:
         to: recipient email or list of emails
         subject: email subject
-        body: email body text
+        body: email HTML body text
         cc: optional CC recipients (email or list)
         bcc: optional BCC recipients (email or list)
         attachments: optional list of file paths to attach
+        body_plain: optional plain-text body for mailto fallback (defaults to converting body)
     """
-    # Create Outlook application object
-    outlook = win32com.client.Dispatch('Outlook.Application')
-    
-    # Create a new mail item (0 = olMailItem)
-    mail = outlook.CreateItem(0)
-    
-    # Set basic properties
-    mail.To = to if isinstance(to, str) else '; '.join(to)
-    mail.Subject = subject
-    mail.HTMLBody = body
-    
-    if cc:
-        mail.CC = cc if isinstance(cc, str) else '; '.join(cc)
-    if bcc:
-        mail.BCC = bcc if isinstance(bcc, str) else '; '.join(bcc)
-    
-    # Add attachments if provided
-    if attachments:
-        for file_path in attachments:
-            mail.Attachments.Add(file_path)
-    
-    # Display the mail window (unsent, so user can review)
-    mail.Display()
+    try:
+        # Create Outlook application object
+        outlook = win32com.client.Dispatch('Outlook.Application')
+        
+        # Create a new mail item (0 = olMailItem)
+        mail = outlook.CreateItem(0)
+        
+        # Set basic properties
+        mail.To = to if isinstance(to, str) else '; '.join(to)
+        mail.Subject = subject
+        mail.HTMLBody = body
+        
+        if cc:
+            mail.CC = cc if isinstance(cc, str) else '; '.join(cc)
+        if bcc:
+            mail.BCC = bcc if isinstance(bcc, str) else '; '.join(bcc)
+        
+        # Add attachments if provided
+        if attachments:
+            for file_path in attachments:
+                mail.Attachments.Add(file_path)
+        
+        # Display the mail window (unsent, so user can review)
+        mail.Display()
+    except Exception as e:
+        print(f"\n[Notice] Outlook COM unavailable ({e}). Opening draft in default mail client via mailto...")
+        plain_content = body_plain if body_plain else html_to_plain_text(body)
+        open_mailto_draft(to=to, subject=subject, body=plain_content, cc=cc, bcc=bcc)
+
 
 def send_mail_to_engineers():
     """Draft (not send) the engineer notification email (Step 4 in main.py).
 
     Reads today's importer CSV, filters to rows with Status == 'Error', and
-    renders them as an HTML table in the email body. If there are no errors,
-    a placeholder message is shown instead. The email is opened via
-    create_outlook_email() (mail.Display()) for manual review, not auto-sent.
+    renders them as an HTML table in the email body (for Outlook) and a plain
+    text table (for mailto fallback). If there are no errors, a placeholder
+    message is shown instead. The email draft is opened for manual review.
     Greeting/signoff/subject text come from config.py's engineer_email_* templates.
     """
     # Build email body (html table)
@@ -344,22 +430,28 @@ def send_mail_to_engineers():
     df = df[df['Status'] == 'Error']
     
     if len(df) == 0:
-        df_html = '<i>[There are no importer errors recorded. Support may still send an email if necessary. Please feel free to attach screenshots from the dashboard.]</i><br>'
+        placeholder = "[There are no importer errors recorded. Support may still send an email if necessary. Please feel free to attach screenshots from the dashboard.]"
+        df_html = f"<i>{placeholder}</i><br>"
+        df_plain = f"{placeholder}\n"
     else:
         df_html = df.to_html(index=None)
+        df_plain = df.to_string(index=False)
 
     today_date = datetime.now().strftime("%Y-%m-%d")
     opening = engineer_email_greeting
     signoff = engineer_email_signoff.format(signoff_name=signoff_name)
-    email_body = opening + df_html + signoff
+    email_body_html = opening + df_html + signoff
     subject = engineer_email_subject.format(today_date=today_date)
 
-
+    opening_plain = html_to_plain_text(opening)
+    signoff_plain = html_to_plain_text(signoff)
+    email_body_plain = f"{opening_plain}\n\n{df_plain}\n\n{signoff_plain}"
 
     create_outlook_email(
-        to= engineer_mails,
+        to=engineer_mails,
         subject=subject,
-        body = email_body,
-        cc= cc_mails,
+        body=email_body_html,
+        cc=cc_mails,
+        body_plain=email_body_plain,
         # attachments=['C:\\path\\to\\file.pdf']
     )
